@@ -1,0 +1,479 @@
+---
+title: "Shooting Deaths Project"
+author: "S. Shasteen"
+date: "2025-03-19"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+R.version
+```
+
+
+```{r, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+```
+
+## Read In Data & Check Column Names
+
+```{r}
+# Assign data URL to a variable 
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+# Read in data
+shooting_incidents <- read.csv(url)
+
+# Check column names to get a sense of data
+
+glimpse(shooting_incidents)
+
+colnames(shooting_incidents)
+
+```
+## Fix Date/Time Data Types & Combine 2 Columns
+
+```{r}
+#Combine OCCUR_DATE and OCCUR_TIME into a single column
+
+shooting_incidents <- shooting_incidents %>%
+  mutate(OCCUR_DATETIME = mdy_hms(paste(OCCUR_DATE, OCCUR_TIME)))
+
+# Verify new column
+
+glimpse(shooting_incidents %>% select(OCCUR_DATE, OCCUR_TIME, OCCUR_DATETIME))
+
+# Check for parsing failures
+
+shooting_incidents %>%
+  filter(is.na(OCCUR_DATETIME)) %>%
+  select(OCCUR_DATE, OCCUR_TIME) %>%
+  summarize(n_failed = n())
+
+```
+```{r}
+# Check for NA/missing data.
+
+sum(is.na(shooting_incidents)) #196 NA values total
+
+# Check individual columns for NA/missing data.
+
+colSums(is.na(shooting_incidents)) # Jurisdiction Code = 2; Lat = 97; Long = 97. = All 196. Inconsequential as I don't
+                                   # care about lat/long or jurisdiction code. 
+
+
+```
+## Start Looking at Gender
+
+
+```{r}
+
+# Checking counts based on gender
+shooting_incidents %>%
+  count(VIC_SEX)
+
+# Checking for missing or unique values in VIC_SEX
+
+shooting_incidents %>%
+  summarize(
+    na_count = sum(is.na(VIC_SEX)),
+    empty_count = sum(VIC_SEX == "" | VIC_SEX == "(null)", na.rm = TRUE),
+    total_rows = n()
+  )
+
+# Checking for unique values
+
+unique(shooting_incidents$VIC_SEX)
+
+#Tally all values
+
+shooting_incidents %>%
+  count(VIC_SEX, sort = TRUE, .drop = FALSE) %>%
+  mutate(percent = n/sum(n)*100)
+
+```
+
+## Subset the Data, Focus on Columns of Interest
+
+
+```{r}
+# Subset data to relevant columns
+
+shoot_subset <- shooting_incidents %>%
+  select(OCCUR_DATETIME, VIC_SEX, VIC_AGE_GROUP, PERP_SEX, PERP_AGE_GROUP, BORO, LOC_CLASSFCTN_DESC, LOCATION_DESC, STATISTICAL_MURDER_FLAG)
+
+# Summarizing the subset
+
+View(shoot_subset)
+
+
+
+
+
+```
+
+## Standardize Missing Values Under PERP_SEX
+
+```{r}
+# Standardize null or missing values to "U"
+
+shoot_subset <- shoot_subset %>%
+  mutate(PERP_SEX = case_when(
+    PERP_SEX %in% c("M") ~"M",
+    PERP_SEX %in% c("F") ~"F",
+    PERP_SEX %in% c("U", "", "(null)") ~ "U",
+    TRUE ~ NA_character_ 
+  ))
+
+# Verify standardization
+
+shoot_subset %>%
+  count(PERP_SEX, sort = TRUE) %>%
+  mutate(percent = n / sum(n)*100)
+
+
+```
+
+## Look at Most Common Locations for Shootings
+
+```{r}
+
+# Subsetting the data
+
+shoot_subset %>%
+  count(PERP_SEX, sort = TRUE)
+
+shoot_subset %>%
+  count(LOCATION_DESC, sort = TRUE)
+
+shoot_subset %>%
+  count(LOC_CLASSFCTN_DESC, sort = TRUE)
+
+
+```
+
+## Standardize Missing Location Data
+
+```{r}
+# Handling missing data for locations
+
+shoot_subset <- shoot_subset %>% 
+  mutate(
+    LOCATION_DESC = case_when(
+      LOCATION_DESC %in% c("", "(null)") ~ "Unknown",
+      TRUE ~ LOCATION_DESC
+    ),
+    LOC_CLASSFCTN_DESC = case_when(
+      LOC_CLASSFCTN_DESC %in% c("", "(null)") ~ "Unknown",
+      TRUE ~ LOC_CLASSFCTN_DESC
+    )
+  )
+
+
+```
+
+## Filter Male Killed by Female Incidents
+
+```{r}
+# Filter and count locations
+
+male_killed_by_female <- shoot_subset %>% 
+  filter(
+    VIC_SEX == "M",
+    PERP_SEX == "F",
+      )
+
+# Count LOCATION_DESC
+male_killed_by_female %>%
+  filter(LOCATION_DESC != "Unknown") %>%
+  count(LOCATION_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Count LOC_CLASSFCTN_DESC
+male_killed_by_female %>%
+  filter(LOC_CLASSFCTN_DESC != "Unknown") %>%
+  count(LOC_CLASSFCTN_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+
+```
+
+## Filter Female Killed by Male Incidents
+
+```{r}
+
+# Filter and count locations
+
+female_killed_by_male <- shoot_subset %>% 
+  filter(
+    VIC_SEX == "F",
+    PERP_SEX == "M",
+      )
+
+# Count LOCATION_DESC
+female_killed_by_male %>%
+  filter(LOCATION_DESC != "Unknown") %>%
+  count(LOCATION_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Count LOC_CLASSFCTN_DESC
+female_killed_by_male %>%
+  filter(LOC_CLASSFCTN_DESC != "Unknown") %>%
+  count(LOC_CLASSFCTN_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+```
+
+## Filter Male Killed by Male Incidents
+
+```{r}
+
+# Filter and count locations
+
+male_killed_by_male <- shoot_subset %>% 
+  filter(
+    VIC_SEX == "M",
+    PERP_SEX == "M",
+      )
+
+# Count LOCATION_DESC
+male_killed_by_male %>%
+  filter(LOCATION_DESC != "Unknown") %>%
+  count(LOCATION_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Count LOC_CLASSFCTN_DESC
+male_killed_by_male %>%
+  filter(LOC_CLASSFCTN_DESC != "Unknown") %>%
+  count(LOC_CLASSFCTN_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+```
+
+## Female Killed by Female Incidents
+
+```{r}
+
+female_killed_by_female <- shoot_subset %>% 
+  filter(
+    VIC_SEX == "F",
+    PERP_SEX == "F",
+      )
+
+# Count LOCATION_DESC
+female_killed_by_female %>%
+  filter(LOCATION_DESC != "Unknown") %>%
+  count(LOCATION_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Count LOC_CLASSFCTN_DESC
+female_killed_by_female %>%
+  filter(LOC_CLASSFCTN_DESC != "Unknown") %>%
+  count(LOC_CLASSFCTN_DESC, sort = TRUE) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+```
+
+
+
+```{r}
+# Saving this spot for what to do next
+
+
+```
+
+## Visualizing the Data
+
+```{r}
+# Combine gender pairs
+combined <- bind_rows(
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "M") %>% 
+    mutate(Group = "Women Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "F") %>% 
+    mutate(Group = "Men Shot by Women"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "M") %>% 
+    mutate(Group = "Men Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "F") %>% 
+    mutate(Group = "Women Shot by Women")
+) %>% 
+  filter(LOCATION_DESC != "Unknown") %>% 
+  count(Group, LOCATION_DESC) %>% 
+  group_by(Group) %>% 
+  mutate(percent = n / sum(n) * 100) %>% 
+  # Keep top 5 locations per group
+  slice_max(order_by = n, n = 5)
+
+# Bar plot
+ggplot(combined, aes(x = reorder(LOCATION_DESC, -percent), y = percent, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "Top Shooting Locations by Victim-Perpetrator Gender",
+    subtitle = "Percent of Non-Unknown Locations",
+    x = "Location", y = "Percent", fill = "Gender Pair"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+
+
+```
+
+
+## Further Visualizations
+
+
+```{r}
+# Combine public housing shootings
+public_housing <- bind_rows(
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "M", LOCATION_DESC == "MULTI DWELL - PUBLIC HOUS") %>% 
+    mutate(Group = "Women Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "F", LOCATION_DESC == "MULTI DWELL - PUBLIC HOUS") %>% 
+    mutate(Group = "Men Shot by Women"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "M", LOCATION_DESC == "MULTI DWELL - PUBLIC HOUS") %>% 
+    mutate(Group = "Men Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "F", LOCATION_DESC == "MULTI DWELL - PUBLIC HOUS") %>% 
+    mutate(Group = "Women Shot by Women")
+) %>% 
+  filter(!is.na(BORO), BORO != "") %>% 
+  count(Group, BORO) %>% 
+  group_by(Group) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Bar plot
+ggplot(public_housing, aes(x = BORO, y = percent, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Public Housing Shootings by Borough and Victim-Perpetrator Gender",
+    subtitle = "Percent of Public Housing Shootings per Gender Pair",
+    x = "Borough", y = "Percent", fill = "Gender Pair"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5)) +
+  scale_fill_manual(values = c("Women Shot by Men" = "red", "Men Shot by Women" = "blue", 
+                               "Men Shot by Men" = "green", "Women Shot by Women" = "purple"))
+```
+
+
+## Anothe Visualization. I'll Come Up with a Title Later
+
+
+```{r}
+
+# Combine gender pairs
+combined_classfctn <- bind_rows(
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "M") %>% 
+    mutate(Group = "Women Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "F") %>% 
+    mutate(Group = "Men Shot by Women"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "M") %>% 
+    mutate(Group = "Men Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "F") %>% 
+    mutate(Group = "Women Shot by Women")
+) %>% 
+  filter(LOC_CLASSFCTN_DESC != "Unknown") %>% 
+  count(Group, LOC_CLASSFCTN_DESC) %>% 
+  group_by(Group) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Bar plot
+ggplot(combined_classfctn, aes(x = reorder(LOC_CLASSFCTN_DESC, -percent), y = percent, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "Shooting Location Types by Victim-Perpetrator Gender",
+    subtitle = "Percent of Non-Unknown Location Classifications",
+    x = "Location Type", y = "Percent", fill = "Gender Pair"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+
+
+```
+
+
+## Domestic Violence Maybe? 
+
+```{r}
+
+# Perpetrator age for home settings
+age_analysis <- bind_rows(
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "M", 
+           LOCATION_DESC %in% c("MULTI DWELL - APT BUILD", "MULTI DWELL - PUBLIC HOUS", "PVT HOUSE")) %>% 
+    mutate(Group = "Women Shot by Men"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "M", PERP_SEX == "F", 
+           LOCATION_DESC %in% c("MULTI DWELL - APT BUILD", "MULTI DWELL - PUBLIC HOUS", "PVT HOUSE")) %>% 
+    mutate(Group = "Men Shot by Women"),
+  shoot_subset %>% 
+    filter(VIC_SEX == "F", PERP_SEX == "F", 
+           LOCATION_DESC %in% c("MULTI DWELL - APT BUILD", "MULTI DWELL - PUBLIC HOUS", "PVT HOUSE")) %>% 
+    mutate(Group = "Women Shot by Women")
+) %>% 
+  filter(PERP_AGE_GROUP != "UNKNOWN") %>% 
+  count(Group, PERP_AGE_GROUP) %>% 
+  group_by(Group) %>% 
+  mutate(percent = n / sum(n) * 100)
+
+# Bar plot
+ggplot(age_analysis, aes(x = PERP_AGE_GROUP, y = percent, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Perpetrator Age in Home Setting Shootings",
+    subtitle = "Percent of Non-Unknown Age Groups",
+    x = "Perpetrator Age Group", y = "Percent", fill = "Gender Pair"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+
+```
+
+
+# Conclusion
+
+This analysis of NYPD shooting incidents (2006–2023, 29,744 cases) examines location patterns by victim and perpetrator gender, revealing distinct trends in gender-based violence:
+
+- **Women Shot by Men** (1,830 cases): 82.4% of non-“Unknown” locations are home settings (35.6% apartment buildings, 32.9% public housing, 13.9% private houses), strongly indicating domestic violence, likely intimate partner violence in low-income settings (e.g., 25% Black poverty in Bronx).
+- **Men Shot by Women** (380 cases): 84.6% of non-“Unknown” locations are home settings (39.9% apartment buildings, 30.3% public housing, 14.4% private houses), suggesting self-defense by women against male partners or, less commonly, female-on-male domestic violence.
+- **Women Shot by Women** (small sample): 87.5% home settings (47.5% apartment buildings, 40.0% public housing), potentially reflecting domestic or interpersonal conflicts.
+- **Men Shot by Men** (large sample): Higher public settings (7.5% grocery/bodega, 65.8% “STREET” in `LOC_CLASSFCTN_DESC`), consistent with community or gang-related violence (April 18 hypothesis).
+- **Public Housing**: Prominent across groups (30.3–40.0% non-“Unknown”), possibly due to socioeconomic stress or policing bias (89% non-White stops in Brooklyn).
+
+**Limitations**:
+- High missing data: ~50% “Unknown” locations (46.9% women shot by men, 50.5% men shot by women), 41.8% unknown perpetrators, limiting pattern clarity.
+- Small sample for men shot by women (380 cases) and women shot by women reduces precision.
+- `LOC_CLASSFCTN_DESC` shows high “STREET” (e.g., 72% men shot by women), conflicting with `LOCATION_DESC` home dominance—possible data entry issues.
+- No motive or legal outcome data to confirm self-defense vs. abuse.
+- Excluded `STATISTICAL_MURDER_FLAG` due to unclear designation, combining fatal and non-fatal shootings.
+
+**Future Steps**:
+- Analyze `PERP_AGE_GROUP` to distinguish self-defense (25–44 females) vs. abuse (18–24 males).
+- Cross-reference domestic violence reports for motive insights.
+- Investigate `LOC_CLASSFCTN_DESC` inconsistencies (e.g., “STREET” vs. `LOCATION_DESC`).
+
+**Key Statistics**:
+
+```{r summary-table, echo=FALSE}
+tibble(
+  Group = c("Women Shot by Men", "Men Shot by Women", "Women Shot by Women", "Men Shot by Men"),
+  Total_Cases = c(1830, 380, NA, NA),
+  Home_Settings_Percent = c(82.4, 84.6, 87.5, NA),
+  Public_Housing_Percent = c(32.9, 30.3, 40.0, 38.5)
+) %>% 
+  knitr::kable(caption = "Summary of Shooting Locations by Gender Pair")
+```
